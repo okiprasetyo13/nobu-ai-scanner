@@ -21,21 +21,25 @@ HEADERS = {'User-Agent': 'Mozilla/5.0'}
 def fetch_klines(symbol, interval='1m', limit=100):
     pair = binance_pairs[symbol]
     params = {'symbol': pair, 'interval': interval, 'limit': limit}
-    try:
-        r = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=10)
-        data = r.json()
-        if len(data) < 2:
-            return pd.DataFrame()
-        df = pd.DataFrame(data, columns=[
-            "time", "open", "high", "low", "close", "volume",
-            "close_time", "qav", "trades", "tbav", "tqav", "ignore"
-        ])
-        df["time"] = pd.to_datetime(df["time"], unit="ms")
-        df["close"] = pd.to_numeric(df["close"])
-        df["volume"] = pd.to_numeric(df["volume"])
-        return df
-    except:
-        return pd.DataFrame()
+    for _ in range(3):
+        try:
+            r = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                if len(data) >= 2:
+                    df = pd.DataFrame(data, columns=[
+                        "time", "open", "high", "low", "close", "volume",
+                        "close_time", "qav", "trades", "tbav", "tqav", "ignore"
+                    ])
+                    df["time"] = pd.to_datetime(df["time"], unit="ms")
+                    df["close"] = pd.to_numeric(df["close"])
+                    df["volume"] = pd.to_numeric(df["volume"])
+                    return df
+            else:
+                st.error(f"Binance error: {r.status_code} - {r.text}")
+        except Exception as e:
+            st.error(f"Exception: {e}")
+    return pd.DataFrame()
 
 def analyze_df(df):
     df['ema9'] = EMAIndicator(close=df['close'], window=9).ema_indicator()
@@ -43,17 +47,14 @@ def analyze_df(df):
     df['rsi'] = RSIIndicator(close=df['close']).rsi()
     df['vol_spike'] = df['volume'] > 1.5 * df['volume'].rolling(20).mean()
     df['signal'] = "Neutral"
-
     df.loc[
         (df['rsi'] < 30) & (df['ema9'] > df['ema21']) & df['vol_spike'],
         'signal'
     ] = "✅ Long Entry"
-
     df.loc[
         (df['rsi'] > 70) & (df['ema9'] < df['ema21']) & df['vol_spike'],
         'signal'
     ] = "✅ Short Entry"
-
     return df
 
 def plot_chart(df):
@@ -69,7 +70,6 @@ def plot_chart(df):
 tab1, tab2 = st.tabs(["📡 Live Scanner", "📊 Historical Data"])
 
 with tab1:
-    from time import sleep
     def analyze(symbol):
         df = fetch_klines(symbol, '1m', 30)
         if df.empty:
@@ -101,7 +101,7 @@ with tab2:
     st.markdown("### 📊 Historical Binance Signal Backtest")
     sel_symbol = st.selectbox("Select Symbol", symbols)
     timeframe = st.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "4h", "1d"])
-    candle_limit = st.slider("Candles to load", 50, 500, 100)
+    candle_limit = st.slider("Candles to load", 50, 300, 100)
 
     hist_df = fetch_klines(sel_symbol, timeframe, candle_limit)
     if not hist_df.empty:
@@ -109,4 +109,4 @@ with tab2:
         plot_chart(hist_df)
         st.dataframe(hist_df[["time", "close", "RSI", "EMA9", "EMA21", "volume", "signal"]].tail(50))
     else:
-        st.warning("❌ Unable to fetch data from Binance for this setting.")
+        st.error("❌ Unable to fetch data from Binance for this setting.")
