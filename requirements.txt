@@ -3,3 +3,4 @@ requests
 pandas
 matplotlib
 ta
+streamlit_autorefresh
