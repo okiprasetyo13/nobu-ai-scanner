@@ -10,20 +10,19 @@ from datetime import datetime
 import time
 from streamlit_autorefresh import st_autorefresh
 
-# --- UI Setup ---
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
-st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner")
+st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner with Debug")
 
-# --- Config ---
+st.caption(f"Updated at: {datetime.now().strftime('%H:%M:%S')}")
+
 BINANCE_URL = "https://api.binance.com/api/v3/klines"
 symbols = ['BTC', 'ETH', 'SOL', 'AVAX', 'LTC', 'DOGE', 'MATIC', 'ADA', 'LINK', 'OP']
 binance_pairs = {s: f"{s}USDT" for s in symbols}
 
-# --- Utility Functions ---
 def fetch_klines(symbol, interval='1m', limit=30):
     pair = binance_pairs[symbol]
     params = {'symbol': pair, 'interval': interval, 'limit': limit}
-    for _ in range(3):  # Retry mechanism
+    for _ in range(3):
         try:
             response = requests.get(BINANCE_URL, params=params, timeout=5)
             if response.status_code == 200:
@@ -41,15 +40,6 @@ def fetch_klines(symbol, interval='1m', limit=30):
             time.sleep(0.5)
     return pd.DataFrame()
 
-def fetch_live_price(symbol):
-    try:
-        url = "https://api.binance.com/api/v3/ticker/price"
-        pair = binance_pairs[symbol]
-        response = requests.get(url, params={'symbol': pair}, timeout=5)
-        return float(response.json()['price'])
-    except:
-        return None
-
 def plot_chart(df, tp):
     fig, ax = plt.subplots(figsize=(3, 1.5))
     ax.plot(df['close'], label='Price')
@@ -66,6 +56,7 @@ def analyze(symbol):
     m5 = fetch_klines(symbol, '5m', 30)
 
     if m1.empty or m5.empty:
+        st.warning(f"{symbol}: Missing candles (M1={len(m1)}, M5={len(m5)})")
         return {"Symbol": symbol, "Signal": "Waiting", "Chart": "", "Valid": False}
 
     m1['ema9'] = EMAIndicator(close=m1['close'], window=9).ema_indicator()
@@ -98,6 +89,8 @@ def analyze(symbol):
 
     chart = plot_chart(m1, tp)
 
+    st.success(f"{symbol}: M1 = {len(m1)}, M5 = {len(m5)}, Last candle = {latest['time'].strftime('%H:%M:%S')}")
+
     return {
         "Symbol": symbol,
         "Price": round(latest['close'], 3),
@@ -122,7 +115,7 @@ def analyze(symbol):
 refresh_seconds = st.slider("⏱ Refresh Interval", 5, 60, 10)
 st_autorefresh(interval=refresh_seconds * 1000, key="refresh")
 
-# --- Analysis ---
+# --- Run Analysis ---
 results = [analyze(s) for s in symbols]
 df = pd.DataFrame([r for r in results if r["Valid"]])
 
@@ -130,4 +123,4 @@ if not df.empty:
     st.markdown("### ✅ Live Scalping Signals")
     st.write(df.drop(columns=["Valid"]).to_html(escape=False), unsafe_allow_html=True)
 else:
-    st.warning("⚠️ Waiting for valid data...")
+    st.info("⚙️ All symbols analyzed — but no valid signal yet.")
