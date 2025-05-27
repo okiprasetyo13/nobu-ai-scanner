@@ -11,7 +11,7 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
-st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner (Fixed)")
+st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner (Azure)")
 
 st.caption(f"Updated at: {datetime.now().strftime('%H:%M:%S')}")
 
@@ -40,14 +40,6 @@ def fetch_klines(symbol, interval='1m', limit=30):
         except Exception:
             time.sleep(0.5)
     return pd.DataFrame()
-
-def fetch_live_price(symbol):
-    try:
-        pair = binance_pairs[symbol]
-        response = requests.get("https://api.binance.com/api/v3/ticker/price", params={'symbol': pair}, headers=HEADERS, timeout=5)
-        return float(response.json()['price'])
-    except:
-        return None
 
 def plot_chart(df, tp):
     fig, ax = plt.subplots(figsize=(3, 1.5))
@@ -97,8 +89,7 @@ def analyze(symbol):
         score = 1
 
     chart = plot_chart(m1, tp)
-
-    st.success(f"{symbol}: M1 = {len(m1)}, M5 = {len(m5)}, Last candle = {latest['time'].strftime('%H:%M:%S')}")
+    st.success(f"{symbol}: M1 = {len(m1)}, M5 = {len(m5)}, Last = {latest['time'].strftime('%H:%M:%S')}")
 
     return {
         "Symbol": symbol,
@@ -122,7 +113,6 @@ def analyze(symbol):
 
 refresh_seconds = st.slider("⏱ Refresh Interval", 5, 60, 10)
 st_autorefresh(interval=refresh_seconds * 1000, key="refresh")
-
 results = [analyze(s) for s in symbols]
 df = pd.DataFrame([r for r in results if r["Valid"]])
 
