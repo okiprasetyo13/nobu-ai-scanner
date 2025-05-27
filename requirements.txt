@@ -1,6 +1,6 @@
 streamlit
-requests
 pandas
+requests
 matplotlib
 ta
-streamlit_autorefresh
+streamlit-autorefresh
