@@ -1,26 +1,42 @@
 import streamlit as st
 import requests
 import pandas as pd
-import matplotlib.pyplot as plt
 from ta.momentum import RSIIndicator
-from ta.trend import EMAIndicator
 
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
-st.title("📡 Nobu AI - Multi-Timeframe Signal Scanner (M1 + M5)")
+st.title("📡 Nobu AI - Multi-Timeframe Signal Scanner (Live)")
 
-st.info("Scanner is running... Please connect this app to Binance API and customize signals for real-time analysis.")
+symbols = ['OPUSDT', 'SOLUSDT', 'ETHUSDT']
 
-# Dummy data just for UI preview
-symbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT']
-dummy_signals = []
+def fetch_binance_klines(symbol, interval, limit=100):
+    url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}'
+    response = requests.get(url)
+    data = response.json()
+    df = pd.DataFrame(data, columns=[
+        "timestamp", "open", "high", "low", "close", "volume",
+        "close_time", "quote_asset_volume", "number_of_trades",
+        "taker_buy_base", "taker_buy_quote", "ignore"
+    ])
+    df["close"] = pd.to_numeric(df["close"])
+    return df
+
+signals = []
 
 for symbol in symbols:
-    dummy_signals.append({
-        "symbol": symbol,
-        "m1_rsi": 28,
-        "m5_rsi": 34,
-        "signal": "BUY" if 28 < 30 and 34 < 50 else "WAIT"
+    m1_df = fetch_binance_klines(symbol, "1m", 50)
+    m5_df = fetch_binance_klines(symbol, "5m", 50)
+
+    rsi_m1 = RSIIndicator(m1_df["close"]).rsi().iloc[-1]
+    rsi_m5 = RSIIndicator(m5_df["close"]).rsi().iloc[-1]
+
+    signal = "BUY" if rsi_m1 < 30 and rsi_m5 < 50 else "WAIT"
+
+    signals.append({
+        "Symbol": symbol,
+        "M1 RSI": round(rsi_m1, 2),
+        "M5 RSI": round(rsi_m5, 2),
+        "Signal": signal
     })
 
-df = pd.DataFrame(dummy_signals)
-st.dataframe(df)
+df_signals = pd.DataFrame(signals)
+st.dataframe(df_signals)
