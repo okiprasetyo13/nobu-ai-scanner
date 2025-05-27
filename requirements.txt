@@ -1,0 +1,6 @@
+streamlit
+pandas
+requests
+matplotlib
+ta
+streamlit-autorefresh
