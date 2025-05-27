@@ -11,20 +11,21 @@ import time
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
-st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner with Debug")
+st.title("📡 Nobu AI - Real-Time Scalping Signal Scanner (Fixed)")
 
 st.caption(f"Updated at: {datetime.now().strftime('%H:%M:%S')}")
 
 BINANCE_URL = "https://api.binance.com/api/v3/klines"
 symbols = ['BTC', 'ETH', 'SOL', 'AVAX', 'LTC', 'DOGE', 'MATIC', 'ADA', 'LINK', 'OP']
 binance_pairs = {s: f"{s}USDT" for s in symbols}
+HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 def fetch_klines(symbol, interval='1m', limit=30):
     pair = binance_pairs[symbol]
     params = {'symbol': pair, 'interval': interval, 'limit': limit}
     for _ in range(3):
         try:
-            response = requests.get(BINANCE_URL, params=params, timeout=5)
+            response = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 if len(data) == limit:
@@ -39,6 +40,14 @@ def fetch_klines(symbol, interval='1m', limit=30):
         except Exception:
             time.sleep(0.5)
     return pd.DataFrame()
+
+def fetch_live_price(symbol):
+    try:
+        pair = binance_pairs[symbol]
+        response = requests.get("https://api.binance.com/api/v3/ticker/price", params={'symbol': pair}, headers=HEADERS, timeout=5)
+        return float(response.json()['price'])
+    except:
+        return None
 
 def plot_chart(df, tp):
     fig, ax = plt.subplots(figsize=(3, 1.5))
@@ -111,11 +120,9 @@ def analyze(symbol):
         "Valid": True
     }
 
-# --- Refresh Timer ---
 refresh_seconds = st.slider("⏱ Refresh Interval", 5, 60, 10)
 st_autorefresh(interval=refresh_seconds * 1000, key="refresh")
 
-# --- Run Analysis ---
 results = [analyze(s) for s in symbols]
 df = pd.DataFrame([r for r in results if r["Valid"]])
 
