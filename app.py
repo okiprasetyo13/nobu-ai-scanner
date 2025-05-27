@@ -9,6 +9,7 @@ from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 from datetime import datetime, timedelta
 import time
+from streamlit_autorefresh import st_autorefresh
 
 # --- UI setup ---
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
@@ -117,7 +118,6 @@ def analyze(symbol):
     }
 
 # --- Refresh Control ---
-from streamlit_autorefresh import st_autorefresh
 refresh_interval = st.slider("⏱ Refresh Interval (seconds)", 5, 60, 10)
 st_autorefresh(interval=refresh_interval * 1000, key="refresh")
 
