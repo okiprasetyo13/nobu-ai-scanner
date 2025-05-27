@@ -7,115 +7,106 @@ from io import BytesIO
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
 from datetime import datetime
-import time
 from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
 st.title("📡 Nobu AI Terminal")
-st.caption(f"✅ Streamlit app loaded successfully at {datetime.now().strftime('%H:%M:%S')}")
+st.caption(f"✅ Streamlit app loaded at {datetime.now().strftime('%H:%M:%S')}")
 
 BINANCE_URL = "https://api.binance.com/api/v3/klines"
 symbols = ['BTC', 'ETH', 'SOL', 'AVAX', 'LTC', 'DOGE', 'MATIC', 'ADA', 'LINK', 'OP']
 binance_pairs = {s: f"{s}USDT" for s in symbols}
 HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
-def fetch_klines(symbol, interval='1m', limit=30):
+def fetch_klines(symbol, interval='1m', limit=100):
     pair = binance_pairs[symbol]
     params = {'symbol': pair, 'interval': interval, 'limit': limit}
-    for _ in range(3):
-        try:
-            response = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=5)
-            if response.status_code == 200:
-                data = response.json()
-                if len(data) == limit:
-                    df = pd.DataFrame(data, columns=[
-                        "time", "open", "high", "low", "close", "volume",
-                        "close_time", "qav", "trades", "tbav", "tqav", "ignore"
-                    ])
-                    df["close"] = pd.to_numeric(df["close"])
-                    df["volume"] = pd.to_numeric(df["volume"])
-                    df["time"] = pd.to_datetime(df["time"], unit="ms")
-                    return df
-        except Exception:
-            time.sleep(0.5)
-    return pd.DataFrame()
+    try:
+        r = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=10)
+        data = r.json()
+        if len(data) < 2:
+            return pd.DataFrame()
+        df = pd.DataFrame(data, columns=[
+            "time", "open", "high", "low", "close", "volume",
+            "close_time", "qav", "trades", "tbav", "tqav", "ignore"
+        ])
+        df["time"] = pd.to_datetime(df["time"], unit="ms")
+        df["close"] = pd.to_numeric(df["close"])
+        df["volume"] = pd.to_numeric(df["volume"])
+        return df
+    except:
+        return pd.DataFrame()
 
-def plot_chart(df, tp):
-    fig, ax = plt.subplots(figsize=(3, 1.5))
-    ax.plot(df['close'], label='Price')
-    ax.plot(df['ema9'], '--', label='EMA9')
-    ax.plot(df['ema21'], ':', label='EMA21')
-    ax.axhline(tp, color='green', linestyle='-.', linewidth=1, label='TP')
-    ax.set_xticks([]); ax.set_yticks([])
-    buf = BytesIO(); plt.tight_layout(); plt.savefig(buf, format='png')
-    buf.seek(0); plt.close(fig)
-    return f'<img src="data:image/png;base64,{base64.b64encode(buf.read()).decode()}" width="200">'
+def analyze_df(df):
+    df['ema9'] = EMAIndicator(close=df['close'], window=9).ema_indicator()
+    df['ema21'] = EMAIndicator(close=df['close'], window=21).ema_indicator()
+    df['rsi'] = RSIIndicator(close=df['close']).rsi()
+    df['vol_spike'] = df['volume'] > 1.5 * df['volume'].rolling(20).mean()
+    df['signal'] = "Neutral"
 
-def analyze(symbol):
-    m1 = fetch_klines(symbol, '1m', 30)
-    m5 = fetch_klines(symbol, '5m', 30)
+    df.loc[
+        (df['rsi'] < 30) & (df['ema9'] > df['ema21']) & df['vol_spike'],
+        'signal'
+    ] = "✅ Long Entry"
 
-    if m1.empty or m5.empty:
-        return {"Symbol": symbol, "Signal": "Waiting", "Chart": "", "Valid": False}
+    df.loc[
+        (df['rsi'] > 70) & (df['ema9'] < df['ema21']) & df['vol_spike'],
+        'signal'
+    ] = "✅ Short Entry"
 
-    m1['ema9'] = EMAIndicator(close=m1['close'], window=9).ema_indicator()
-    m1['ema21'] = EMAIndicator(close=m1['close'], window=21).ema_indicator()
-    m1['rsi'] = RSIIndicator(close=m1['close']).rsi()
-    m1['vol_spike'] = m1['volume'] > 1.5 * m1['volume'].rolling(20).mean()
+    return df
 
-    latest = m1.iloc[-1]
-    tp = latest['close'] + 0.5
-    sl = latest['close'] - 0.3
+def plot_chart(df):
+    fig, ax = plt.subplots(figsize=(6, 3))
+    ax.plot(df['time'], df['close'], label='Price')
+    ax.plot(df['time'], df['ema9'], '--', label='EMA9')
+    ax.plot(df['time'], df['ema21'], ':', label='EMA21')
+    ax.legend()
+    ax.set_title("Price with EMA")
+    ax.grid(True)
+    st.pyplot(fig)
 
-    m5['ema9'] = EMAIndicator(close=m5['close'], window=9).ema_indicator()
-    m5['ema21'] = EMAIndicator(close=m5['close'], window=21).ema_indicator()
+tab1, tab2 = st.tabs(["📡 Live Scanner", "📊 Historical Data"])
 
-    trend_bull = m5['ema9'].iloc[-1] > m5['ema21'].iloc[-1]
-    trend_bear = m5['ema9'].iloc[-1] < m5['ema21'].iloc[-1]
+with tab1:
+    from time import sleep
+    def analyze(symbol):
+        df = fetch_klines(symbol, '1m', 30)
+        if df.empty:
+            return {"Symbol": symbol, "Signal": "Waiting", "Valid": False}
+        df = analyze_df(df)
+        latest = df.iloc[-1]
+        return {
+            "Symbol": symbol,
+            "Price": round(latest['close'], 3),
+            "RSI": round(latest['rsi'], 2),
+            "EMA9": round(latest['ema9'], 3),
+            "EMA21": round(latest['ema21'], 3),
+            "Volume": round(latest['volume'], 2),
+            "Signal": latest['signal'],
+            "Time": latest['time'].strftime('%H:%M:%S'),
+            "Valid": True
+        }
 
-    signal = "Neutral"
-    score = 0
+    st_autorefresh(interval=10000, key="refresh")
+    results = [analyze(s) for s in symbols]
+    df_live = pd.DataFrame([r for r in results if r["Valid"]])
+    if len(df_live) > 0:
+        st.markdown("### ✅ Live Scalping Signals")
+        st.write(df_live.drop(columns=["Valid"]))
+    else:
+        st.warning("⚠️ No valid signal data yet. Waiting for Binance...")
 
-    if latest['rsi'] < 30 and latest['ema9'] > latest['ema21'] and latest['vol_spike'] and trend_bull:
-        signal = "✅ Long Entry"
-        score = 4
-    elif latest['rsi'] > 70 and latest['ema9'] < latest['ema21'] and latest['vol_spike'] and trend_bear:
-        signal = "✅ Short Entry"
-        score = 4
-    elif latest['vol_spike']:
-        signal = "⚡ Volume Spike"
-        score = 1
+with tab2:
+    st.markdown("### 📊 Historical Binance Signal Backtest")
+    sel_symbol = st.selectbox("Select Symbol", symbols)
+    timeframe = st.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "4h", "1d"])
+    candle_limit = st.slider("Candles to load", 50, 500, 100)
 
-    chart = plot_chart(m1, tp)
-
-    return {
-        "Symbol": symbol,
-        "Price": round(latest['close'], 3),
-        "RSI": round(latest['rsi'], 2),
-        "EMA9": round(latest['ema9'], 3),
-        "EMA21": round(latest['ema21'], 3),
-        "Support": round(m1['close'].rolling(20).min().iloc[-1], 3),
-        "Resistance": round(m1['close'].rolling(20).max().iloc[-1], 3),
-        "Volume": round(latest['volume'], 2),
-        "Signal": signal,
-        "Entry": round(latest['close'], 3),
-        "SL": round(sl, 3),
-        "TP": round(tp, 3),
-        "Score": score,
-        "Status": "Monitoring",
-        "Time": latest['time'].strftime('%H:%M:%S'),
-        "Chart": chart,
-        "Valid": True
-    }
-
-refresh_seconds = st.slider("⏱ Refresh Interval", 5, 60, 10)
-st_autorefresh(interval=refresh_seconds * 1000, key="refresh")
-results = [analyze(s) for s in symbols]
-df = pd.DataFrame([r for r in results if r["Valid"]])
-
-if len(df) > 0:
-    st.markdown("### ✅ Live Scalping Signals")
-    st.write(df.drop(columns=["Valid"]).to_html(escape=False), unsafe_allow_html=True)
-else:
-    st.warning("⚠️ Streamlit loaded, but no valid data yet. Waiting for Binance...")
-    st.info("Try refreshing in a few seconds.")
+    hist_df = fetch_klines(sel_symbol, timeframe, candle_limit)
+    if not hist_df.empty:
+        hist_df = analyze_df(hist_df)
+        plot_chart(hist_df)
+        st.dataframe(hist_df[["time", "close", "RSI", "EMA9", "EMA21", "volume", "signal"]].tail(50))
+    else:
+        st.warning("❌ Unable to fetch data from Binance for this setting.")
