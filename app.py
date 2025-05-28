@@ -1,112 +1,108 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
+from datetime import datetime
 import matplotlib.pyplot as plt
-import base64
 from io import BytesIO
+import base64
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
-from datetime import datetime
-from streamlit_autorefresh import st_autorefresh
 
-st.set_page_config(page_title="Nobu AI Terminal", layout="wide")
-st.title("📡 Nobu AI Terminal")
-st.caption(f"✅ Streamlit app loaded at {datetime.now().strftime('%H:%M:%S')}")
+st.set_page_config(page_title="Nobu AI Terminal - Coinbase Pro", layout="wide")
+st.title("📡 Nobu AI Terminal - Expert Scalping (Coinbase)")
 
-BINANCE_URL = "https://api.binance.com/api/v3/klines"
-symbols = ['BTC', 'ETH', 'SOL', 'AVAX', 'LTC', 'DOGE', 'MATIC', 'ADA', 'LINK', 'OP']
-binance_pairs = {s: f"{s}USDT" for s in symbols}
-HEADERS = {'User-Agent': 'Mozilla/5.0'}
+COINBASE_URL = "https://api.exchange.coinbase.com"
+products = ["BTC-USD", "ETH-USD", "SOL-USD", "AVAX-USD", "LTC-USD", "MATIC-USD", "OP-USD"]
 
-def fetch_klines(symbol, interval='1m', limit=100):
-    pair = binance_pairs[symbol]
-    params = {'symbol': pair, 'interval': interval, 'limit': limit}
-    for _ in range(3):
-        try:
-            r = requests.get(BINANCE_URL, params=params, headers=HEADERS, timeout=10)
-            if r.status_code == 200:
-                data = r.json()
-                if len(data) >= 2:
-                    df = pd.DataFrame(data, columns=[
-                        "time", "open", "high", "low", "close", "volume",
-                        "close_time", "qav", "trades", "tbav", "tqav", "ignore"
-                    ])
-                    df["time"] = pd.to_datetime(df["time"], unit="ms")
-                    df["close"] = pd.to_numeric(df["close"])
-                    df["volume"] = pd.to_numeric(df["volume"])
-                    return df
-            else:
-                st.error(f"Binance error: {r.status_code} - {r.text}")
-        except Exception as e:
-            st.error(f"Exception: {e}")
-    return pd.DataFrame()
+intervals = {
+    "1m": 60,
+    "5m": 300,
+    "15m": 900,
+    "1h": 3600,
+    "4h": 14400,
+    "1d": 86400
+}
 
-def analyze_df(df):
-    df['ema9'] = EMAIndicator(close=df['close'], window=9).ema_indicator()
-    df['ema21'] = EMAIndicator(close=df['close'], window=21).ema_indicator()
-    df['rsi'] = RSIIndicator(close=df['close']).rsi()
-    df['vol_spike'] = df['volume'] > 1.5 * df['volume'].rolling(20).mean()
-    df['signal'] = "Neutral"
-    df.loc[
-        (df['rsi'] < 30) & (df['ema9'] > df['ema21']) & df['vol_spike'],
-        'signal'
-    ] = "✅ Long Entry"
-    df.loc[
-        (df['rsi'] > 70) & (df['ema9'] < df['ema21']) & df['vol_spike'],
-        'signal'
-    ] = "✅ Short Entry"
+def fetch_candles(symbol, granularity, limit=100):
+    try:
+        url = f"{COINBASE_URL}/products/{symbol}/candles"
+        params = {"granularity": granularity}
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+        if not isinstance(data, list) or len(data) == 0:
+            return pd.DataFrame()
+        df = pd.DataFrame(data, columns=["time", "low", "high", "open", "close", "volume"])
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df = df.sort_values("time")
+        df.reset_index(drop=True, inplace=True)
+        return df
+    except:
+        return pd.DataFrame()
+
+def analyze(df):
+    df["ema9"] = EMAIndicator(close=df["close"], window=9).ema_indicator()
+    df["ema21"] = EMAIndicator(close=df["close"], window=21).ema_indicator()
+    df["rsi"] = RSIIndicator(close=df["close"]).rsi()
+    df["support"] = df["low"].rolling(20).min()
+    df["resistance"] = df["high"].rolling(20).max()
+    df["signal"] = "Neutral"
+    df["score"] = 0
+
+    conditions = (
+        (df["rsi"] < 30) &
+        (df["ema9"] > df["ema21"]) &
+        (df["volume"] > df["volume"].rolling(20).mean())
+    )
+    df.loc[conditions, "signal"] = "✅ Long"
+    df.loc[conditions, "score"] = 4
+
     return df
 
-def plot_chart(df):
-    fig, ax = plt.subplots(figsize=(6, 3))
-    ax.plot(df['time'], df['close'], label='Price')
-    ax.plot(df['time'], df['ema9'], '--', label='EMA9')
-    ax.plot(df['time'], df['ema21'], ':', label='EMA21')
-    ax.legend()
-    ax.set_title("Price with EMA")
-    ax.grid(True)
-    st.pyplot(fig)
+def mini_chart(df):
+    fig, ax = plt.subplots(figsize=(2.5, 1.5))
+    ax.plot(df["close"], label="Close")
+    ax.plot(df["ema9"], '--', label="EMA9")
+    ax.plot(df["ema21"], ':', label="EMA21")
+    ax.set_xticks([]); ax.set_yticks([])
+    plt.tight_layout()
+    buf = BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close(fig)
+    return f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}" width="180">'
 
-tab1, tab2 = st.tabs(["📡 Live Scanner", "📊 Historical Data"])
+selected_interval = st.selectbox("Select Timeframe", list(intervals.keys()), index=0)
+granularity = intervals[selected_interval]
 
-with tab1:
-    def analyze(symbol):
-        df = fetch_klines(symbol, '1m', 30)
-        if df.empty:
-            return {"Symbol": symbol, "Signal": "Waiting", "Valid": False}
-        df = analyze_df(df)
-        latest = df.iloc[-1]
-        return {
-            "Symbol": symbol,
-            "Price": round(latest['close'], 3),
-            "RSI": round(latest['rsi'], 2),
-            "EMA9": round(latest['ema9'], 3),
-            "EMA21": round(latest['ema21'], 3),
-            "Volume": round(latest['volume'], 2),
-            "Signal": latest['signal'],
-            "Time": latest['time'].strftime('%H:%M:%S'),
-            "Valid": True
-        }
+result_rows = []
 
-    st_autorefresh(interval=10000, key="refresh")
-    results = [analyze(s) for s in symbols]
-    df_live = pd.DataFrame([r for r in results if r["Valid"]])
-    if len(df_live) > 0:
-        st.markdown("### ✅ Live Scalping Signals")
-        st.write(df_live.drop(columns=["Valid"]))
-    else:
-        st.warning("⚠️ No valid signal data yet. Waiting for Binance...")
+for symbol in products:
+    df = fetch_candles(symbol, granularity, limit=100)
+    if df.empty or len(df) < 30:
+        continue
+    df = analyze(df)
+    last = df.iloc[-1]
+    entry = last["close"]
+    support = last["support"]
+    resistance = last["resistance"]
+    sl = round(support - (entry - support)*0.5, 2)
+    tp = round(entry + (resistance - entry)*0.5, 2)
+    chart = mini_chart(df)
 
-with tab2:
-    st.markdown("### 📊 Historical Binance Signal Backtest")
-    sel_symbol = st.selectbox("Select Symbol", symbols)
-    timeframe = st.selectbox("Timeframe", ["1m", "5m", "15m", "1h", "4h", "1d"])
-    candle_limit = st.slider("Candles to load", 50, 300, 100)
+    result_rows.append({
+        "Symbol": symbol,
+        "Buy Price": round(entry, 2),
+        "Support": round(support, 2),
+        "Resistance": round(resistance, 2),
+        "SL": sl,
+        "TP": tp,
+        "Score": last["score"],
+        "Signal": last["signal"],
+        "Chart": chart
+    })
 
-    hist_df = fetch_klines(sel_symbol, timeframe, candle_limit)
-    if not hist_df.empty:
-        hist_df = analyze_df(hist_df)
-        plot_chart(hist_df)
-        st.dataframe(hist_df[["time", "close", "RSI", "EMA9", "EMA21", "volume", "signal"]].tail(50))
-    else:
-        st.error("❌ Unable to fetch data from Binance for this setting.")
+if result_rows:
+    df_result = pd.DataFrame(result_rows)
+    st.markdown("### 📈 Expert-Level Scalping Signals (Coinbase)")
+    st.write(df_result.to_html(escape=False), unsafe_allow_html=True)
+else:
+    st.warning("⚠️ No valid signal data yet. Please try a different timeframe or wait for new candles.")
