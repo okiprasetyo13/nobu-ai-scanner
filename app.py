@@ -6,6 +6,7 @@ from io import BytesIO
 import base64
 from ta.momentum import RSIIndicator
 from ta.trend import EMAIndicator
+import time
 
 st.set_page_config(page_title="Nobu AI Terminal – Elite Scalping", layout="wide")
 st.title("📡 Nobu AI Terminal – Elite Crypto Scalping (Coinbase)")
@@ -32,6 +33,14 @@ def fetch_candles(symbol, granularity, limit=100):
     except Exception as e:
         return pd.DataFrame()
 
+def fetch_live_price(symbol):
+    try:
+        url = f"{COINBASE_URL}/products/{symbol}/ticker"
+        r = requests.get(url, timeout=5)
+        return float(r.json().get("price", 0))
+    except:
+        return 0
+
 def analyze(df):
     df["ema9"] = EMAIndicator(close=df["close"], window=9).ema_indicator()
     df["ema21"] = EMAIndicator(close=df["close"], window=21).ema_indicator()
@@ -42,7 +51,7 @@ def analyze(df):
     df["score"] = 0
 
     signal_cond = (
-        (df["rsi"] < 30) &
+        (df["rsi"] < 35) &
         (df["ema9"] > df["ema21"]) &
         (df["volume"] > df["volume"].rolling(20).mean())
     )
@@ -63,8 +72,6 @@ def mini_chart(df):
     plt.close(fig)
     return f'<img src="data:image/png;base64,{base64.b64encode(buf.getvalue()).decode()}" width="160">'
 
-st.markdown("### 🧠 Elite Scalping Signals Table")
-
 selected_interval = st.selectbox("Select Timeframe", list(intervals.keys()), index=0)
 granularity = intervals[selected_interval]
 
@@ -82,8 +89,9 @@ for symbol in products:
     sl = round(support - (entry - support)*0.5, 2)
     tp = round(entry + (resistance - entry)*0.5, 2)
     chart = mini_chart(df)
+    live_price = fetch_live_price(symbol)
     results.append({
-        "Symbol": f"{symbol} (${round(entry, 2)})",
+        "Symbol": f"{symbol} (${round(live_price, 2)})",
         "Signal": last["signal"],
         "Score": last["score"],
         "RSI": round(last["rsi"], 2),
@@ -97,8 +105,10 @@ for symbol in products:
         "Chart": chart
     })
 
+st.markdown("### 📊 Expert Scalping Signal Table")
+
 if results:
     df_result = pd.DataFrame(results)
     st.write(df_result.to_html(escape=False), unsafe_allow_html=True)
 else:
-    st.warning("⚠️ No valid signal data yet. Please try a different timeframe or wait for more candles.")
+    st.warning("⚠️ No valid signal data yet. Try a different timeframe or wait for updates.")
